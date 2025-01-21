@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Math Gesture Solver</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1280px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .video-container {
+            position: relative;
+            width: 640px;
+            margin-bottom: 20px;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .canvas-display {
+            width: 640px;
+            margin-bottom: 20px;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .video-wrapper {
+            position: relative;
+            width: 640px;
+            height: 480px;
+        }
+        #videoElement {
+            width: 640px;
+            height: 480px;
+            transform: scaleX(-1);
+        }
+        #drawingCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 640px;
+            height: 480px;
+            opacity: 0.3;
+        }
+        #gestureCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 640px;
+            height: 480px;
+            pointer-events: none;
+        }
+        #outputCanvas {
+            width: 640px;
+            height: 480px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: white;
+        }
+        .controls {
+            margin-top: 10px;
+            display: flex;
+            gap: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .result-container {
+            grid-column: span 2;
+            margin-top: 20px;
+            padding: 20px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="video-container">
+            <h3>Camera Feed & Drawing</h3>
+            <div class="video-wrapper">
+                <video id="videoElement" autoplay playsinline></video>
+                <canvas id="drawingCanvas"></canvas>
+                <canvas id="gestureCanvas"></canvas>
+            </div>
+            <div class="controls">
+                <button onclick="clearCanvas()">Clear Canvas</button>
+            </div>
+        </div>
+
+        <div class="canvas-display">
+            <h3>Drawing Output</h3>
+            <canvas id="outputCanvas"></canvas>
+        </div>
+        
+        <div class="result-container">
+            <h3>AI Solution:</h3>
+            <div id="aiResult">Draw a math problem and show four fingers to get the solution...</div>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('videoElement');
+        const drawingCanvas = document.getElementById('drawingCanvas');
+        const gestureCanvas = document.getElementById('gestureCanvas');
+        const outputCanvas = document.getElementById('outputCanvas');
+        const drawingCtx = drawingCanvas.getContext('2d');
+        const gestureCtx = gestureCanvas.getContext('2d');
+        const outputCtx = outputCanvas.getContext('2d');
+        let isVideoInitialized = false;
+        let lastPosition = null;
+
+        // Set canvas sizes
+        drawingCanvas.width = 640;
+        drawingCanvas.height = 480;
+        gestureCanvas.width = 640;
+        gestureCanvas.height = 480;
+        outputCanvas.width = 640;
+        outputCanvas.height = 480;
+
+        // Initialize video
+        async function initVideo() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: {
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    }
+                });
+                video.srcObject = stream;
+                isVideoInitialized = true;
+            } catch (err) {
+                console.error('Error accessing camera:', err);
+            }
+        }
+
+        // Clear canvas
+        function clearCanvas() {
+            lastPosition = null;
+            drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+            outputCtx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
+            fetch('/api/clear-canvas/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+        }
+
+        // Process frames
+        function processFrame() {
+            if (!isVideoInitialized || video.paused || video.ended) {
+                requestAnimationFrame(processFrame);
+                return;
+            }
+
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = 640;
+            tempCanvas.height = 480;
+            const tempCtx = tempCanvas.getContext('2d');
+            
+            // Always mirror the frame for processing
+            tempCtx.setTransform(-1, 0, 0, 1, tempCanvas.width, 0);
+            tempCtx.drawImage(video, 0, 0, 640, 480);
+            tempCtx.setTransform(1, 0, 0, 1, 0, 0);
+
+            fetch('/api/process-frame/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    frame: tempCanvas.toDataURL(),
+                    last_position: lastPosition
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Update gesture visualization
+                    if (data.processed_frame) {
+                        const img = new Image();
+                        img.onload = () => {
+                            gestureCtx.clearRect(0, 0, gestureCanvas.width, gestureCanvas.height);
+                            gestureCtx.drawImage(img, 0, 0);
+                        };
+                        img.src = data.processed_frame;
+                    }
+
+                    // Update drawing canvas and output canvas
+                    if (data.canvas) {
+                        const img = new Image();
+                        img.onload = () => {
+                            drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+                            outputCtx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
+                            drawingCtx.drawImage(img, 0, 0);
+                            outputCtx.drawImage(img, 0, 0);
+                        };
+                        img.src = data.canvas;
+                    }
+
+                    // Update last position for line drawing
+                    if (data.drawing_mode && data.position) {
+                        lastPosition = data.position;
+                    } else {
+                        lastPosition = null;
+                    }
+
+                    // Update AI response
+                    if (data.ai_response) {
+                        document.getElementById('aiResult').innerText = data.ai_response;
+                    }
+                }
+            })
+            .catch(error => console.error('Error:', error));
+
+            requestAnimationFrame(processFrame);
+        }
+
+        // Start everything
+        initVideo().then(() => {
+            video.onloadedmetadata = () => {
+                processFrame();
+            };
+        });
+    </script>
+</body>
+</html> 
