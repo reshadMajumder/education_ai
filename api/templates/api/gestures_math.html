@@ -10,10 +10,10 @@
             background-color: #f5f5f5;
         }
         .container {
-            max-width: 1280px;
+            max-width: 1920px;
             margin: 0 auto;
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr 1fr 1fr;
             gap: 20px;
         }
         .video-container {
@@ -79,8 +79,22 @@
             border-radius: 5px;
             cursor: pointer;
         }
+        .tracking-display {
+            width: 640px;
+            margin-bottom: 20px;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        #trackingCanvas {
+            width: 640px;
+            height: 480px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
         .result-container {
-            grid-column: span 2;
+            grid-column: span 3;
             margin-top: 20px;
             padding: 20px;
             background: white;
@@ -107,6 +121,11 @@
             <h3>Drawing Output</h3>
             <canvas id="outputCanvas"></canvas>
         </div>
+
+        <div class="tracking-display">
+            <h3>Hand Tracking & Virtual Drawing</h3>
+            <canvas id="trackingCanvas"></canvas>
+        </div>
         
         <div class="result-container">
             <h3>AI Solution:</h3>
@@ -119,11 +138,14 @@
         const drawingCanvas = document.getElementById('drawingCanvas');
         const gestureCanvas = document.getElementById('gestureCanvas');
         const outputCanvas = document.getElementById('outputCanvas');
+        const trackingCanvas = document.getElementById('trackingCanvas');
         const drawingCtx = drawingCanvas.getContext('2d');
         const gestureCtx = gestureCanvas.getContext('2d');
         const outputCtx = outputCanvas.getContext('2d');
+        const trackingCtx = trackingCanvas.getContext('2d');
         let isVideoInitialized = false;
         let lastPosition = null;
+        let virtualDrawing = new Image();
 
         // Set canvas sizes
         drawingCanvas.width = 640;
@@ -132,6 +154,8 @@
         gestureCanvas.height = 480;
         outputCanvas.width = 640;
         outputCanvas.height = 480;
+        trackingCanvas.width = 640;
+        trackingCanvas.height = 480;
 
         // Initialize video
         async function initVideo() {
@@ -152,8 +176,10 @@
         // Clear canvas
         function clearCanvas() {
             lastPosition = null;
+            virtualDrawing = new Image();
             drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
             outputCtx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
+            trackingCtx.clearRect(0, 0, trackingCanvas.width, trackingCanvas.height);
             fetch('/api/clear-canvas/', {
                 method: 'POST',
                 headers: {
@@ -174,7 +200,7 @@
             tempCanvas.height = 480;
             const tempCtx = tempCanvas.getContext('2d');
             
-            // Always mirror the frame for processing
+            // Mirror the frame for processing
             tempCtx.setTransform(-1, 0, 0, 1, tempCanvas.width, 0);
             tempCtx.drawImage(video, 0, 0, 640, 480);
             tempCtx.setTransform(1, 0, 0, 1, 0, 0);
@@ -192,12 +218,45 @@
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    // Update gesture visualization
+                    // Update gesture visualization and tracking
                     if (data.processed_frame) {
                         const img = new Image();
                         img.onload = () => {
                             gestureCtx.clearRect(0, 0, gestureCanvas.width, gestureCanvas.height);
                             gestureCtx.drawImage(img, 0, 0);
+
+                            // Update tracking canvas with hand landmarks and virtual drawing
+                            trackingCtx.clearRect(0, 0, trackingCanvas.width, trackingCanvas.height);
+                            trackingCtx.drawImage(video, 0, 0, trackingCanvas.width, trackingCanvas.height);
+                            trackingCtx.drawImage(img, 0, 0);
+                            
+                            // Draw virtual line when in drawing mode
+                            if (data.drawing_mode && data.position) {
+                                const [x, y] = data.position;
+                                trackingCtx.beginPath();
+                                trackingCtx.strokeStyle = 'rgba(255, 0, 255, 0.7)';
+                                trackingCtx.lineWidth = 4;
+                                
+                                if (lastPosition) {
+                                    trackingCtx.moveTo(lastPosition[0], lastPosition[1]);
+                                    trackingCtx.lineTo(x, y);
+                                    trackingCtx.stroke();
+                                }
+                                
+                                // Draw current point
+                                trackingCtx.beginPath();
+                                trackingCtx.fillStyle = 'rgba(255, 0, 255, 0.7)';
+                                trackingCtx.arc(x, y, 4, 0, Math.PI * 2);
+                                trackingCtx.fill();
+                            }
+
+                            // Draw the canvas content on tracking display
+                            if (data.canvas) {
+                                virtualDrawing.src = data.canvas;
+                                trackingCtx.globalAlpha = 0.3;
+                                trackingCtx.drawImage(virtualDrawing, 0, 0);
+                                trackingCtx.globalAlpha = 1.0;
+                            }
                         };
                         img.src = data.processed_frame;
                     }
